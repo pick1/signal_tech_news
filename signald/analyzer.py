@@ -84,14 +84,22 @@ def analyze_with_ollama(content: str, source_hint: str, model: str) -> dict:
 # ─── OpenAI-Compatible API ────────────────────────────────────────────────────
 
 
-def analyze_with_openai(content: str, source_hint: str, model: str) -> dict:
+def analyze_with_openai(
+    content: str,
+    source_hint: str,
+    model: str,
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> dict:
     """Analyze content using an OpenAI-compatible API."""
     system_prompt, user_prompt = build_prompt(content, source_hint)
+    resolved_base_url = (base_url or OPENAI_BASE_URL).rstrip("/")
+    resolved_api_key = api_key if api_key is not None else OPENAI_API_KEY
     headers = {
         "Content-Type": "application/json",
     }
-    if OPENAI_API_KEY:
-        headers["Authorization"] = f"Bearer {OPENAI_API_KEY}"
+    if resolved_api_key:
+        headers["Authorization"] = f"Bearer {resolved_api_key}"
     payload = {
         "model": model,
         "messages": [
@@ -103,7 +111,7 @@ def analyze_with_openai(content: str, source_hint: str, model: str) -> dict:
     }
     try:
         resp = requests.post(
-            OPENAI_BASE_URL.rstrip("/") + "/chat/completions",
+            resolved_base_url + "/chat/completions",
             headers=headers,
             json=payload,
             timeout=120,
@@ -137,6 +145,9 @@ def analyze_content(
     source_hint: str,
     provider: str,
     tier_override: str | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model_override: str | None = None,
 ) -> dict:
     """Analyze content with the appropriate provider and fallback chain.
 
@@ -145,6 +156,9 @@ def analyze_content(
         source_hint: Content type hint (url, article, tweet, instagram, etc.)
         provider: 'ollama' or 'openai'
         tier_override: Force a specific tier (light/default/deep), or None for auto.
+        base_url: Custom OpenAI-compatible endpoint URL (overrides OPENAI_BASE_URL).
+        api_key: Custom API key (overrides OPENAI_API_KEY).
+        model_override: Use this model instead of auto-selecting one.
 
     Returns:
         Parsed JSON dict with title, category, summary, verdict, etc.
@@ -152,11 +166,11 @@ def analyze_content(
     Raises:
         ValueError: If all providers fail.
     """
-    model = pick_model(source_hint, provider, tier_override)
+    model = model_override or pick_model(source_hint, provider, tier_override)
 
     if provider == "openai":
         try:
-            return analyze_with_openai(content, source_hint, model)
+            return analyze_with_openai(content, source_hint, model, base_url=base_url, api_key=api_key)
         except Exception as e:
             if FALLBACK_ENABLED:
                 fallback_model = MODEL_TIERS["default"]["ollama"]
@@ -172,7 +186,7 @@ def analyze_content(
                 fallback_model = MODEL_TIERS["default"]["openai"]
                 if OPENAI_API_KEY:
                     _notify(f"Ollama failed ({model}), falling back to OpenAI ({fallback_model})", "⚠️")
-                    return analyze_with_openai(content, source_hint, fallback_model)
+                    return analyze_with_openai(content, source_hint, fallback_model, base_url=base_url, api_key=api_key)
             raise
         return result
 

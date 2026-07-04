@@ -15,6 +15,7 @@ import urllib.parse
 from datetime import datetime
 
 import streamlit as st
+import os
 
 from signald.config import (
     PROJECT_DIR,
@@ -301,13 +302,39 @@ with st.sidebar:
     st.divider()
 
     st.markdown("**Provider**")
-    provider_options = ["OpenCode Zen", "Ollama (local)"]
-    provider_choice = st.selectbox(
-        "Provider", provider_options,
-        index=1,
+    # Provider options: OpenRouter Free (primary) → OpenRouter Free (fallback) → Jetson LAN → Qwen Local
+    OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    OPENROUTER_API_KEY_1 = os.getenv("OPENROUTER_API_KEY")
+    OPENROUTER_API_KEY_2 = os.getenv("OPENROUTER_API_KEY_FALLBACK")
+    OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-pro-1.5")
+    JETSON_BASE_URL = os.getenv("JETSON_BASE_URL", "http://192.168.1.110:8080/v1")
+    JETSON_API_KEY = os.getenv("JETSON_API_KEY", "")
+    JETSON_MODEL = os.getenv("JETSON_MODEL", "qwen3-14b")
+    LOCAL_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1")
+    LOCAL_API_KEY = os.getenv("LOCAL_LLM_API_KEY", "ollama")
+    LOCAL_MODEL = os.getenv("LOCAL_LLM_MODEL", "qwen3:14b")
+
+    provider_options = [
+        {"label": "OpenRouter Free (primary)", "provider": "openai",
+         "base_url": OPENROUTER_BASE_URL, "api_key": OPENROUTER_API_KEY_1, "model": OPENROUTER_MODEL},
+        {"label": "OpenRouter Free (fallback)", "provider": "openai",
+         "base_url": OPENROUTER_BASE_URL, "api_key": OPENROUTER_API_KEY_2, "model": OPENROUTER_MODEL},
+        {"label": "Jetson LAN (Xavier)", "provider": "openai",
+         "base_url": JETSON_BASE_URL, "api_key": JETSON_API_KEY, "model": JETSON_MODEL},
+        {"label": "Qwen Local (Ollama)", "provider": "openai",
+         "base_url": LOCAL_BASE_URL, "api_key": LOCAL_API_KEY, "model": LOCAL_MODEL},
+    ]
+    provider_labels = [opt["label"] for opt in provider_options]
+    provider_choice_label = st.selectbox(
+        "Provider", provider_labels,
+        index=0,
         label_visibility="collapsed",
     )
-    provider = "openai" if "OpenCode" in provider_choice else "ollama"
+    selected_opt = next(opt for opt in provider_options if opt["label"] == provider_choice_label)
+    provider = selected_opt["provider"]
+    base_url = selected_opt["base_url"]
+    api_key = selected_opt["api_key"]
+    model_override = selected_opt["model"]
 
     st.markdown("**Analysis Depth**")
     tier_options = ["Auto (per source type)", "Light", "Default", "Deep"]
@@ -433,9 +460,12 @@ if analyze_btn and input_text.strip():
             n = len(repo_data)
             fetch_notice = (fetch_notice or "Ready") + f" · {n} repo{'s' if n > 1 else ''} found"
 
-    with st.spinner(f"Analyzing via {provider}..."):
+    with st.spinner(f"Analyzing via {provider_choice_label}..."):
         try:
-            result = analyze_content(content, detected, provider, tier_override)
+            result = analyze_content(
+                content, detected, provider, tier_override,
+                base_url=base_url, model_override=model_override, api_key=api_key,
+            )
             enrichment = run_enrichment(content, result, provider) if run_enrich else None
             entry = {
                 "id": str(int(time.time() * 1000)),
